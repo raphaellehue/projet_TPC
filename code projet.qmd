@@ -4,6 +4,7 @@ format: pdf
 editor: visual
 ---
 
+# Importation de la base
 ```{r}
 library(readr)
 
@@ -15,10 +16,17 @@ df <- read_delim(
 )
 ```
 
-
+## Suppression des colonnes 
 ```{r}
 df <- df[-c(1, 2, 3), ]
 df <- df[, !names(df) %in% "Codes"]
 View (df)
 ```
+
+## NA
+```{r}
+library(naniar)
+vis_miss(df)
+```
+Pas de valeurs manquantes 
 
