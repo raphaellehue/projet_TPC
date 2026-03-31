@@ -9,14 +9,16 @@ editor: visual
 library(readr)
 
 df <- read_delim(
-  "C:/Users/rhuep/Downloads/valeurs_mensuelles.csv",
-  delim = ";",
-  escape_double = FALSE,
-  trim_ws = TRUE
+  "C:/Users/rhuep/Downloads/valeurs_mensuelles.csv", delim = ";", escape_double = FALSE,trim_ws = TRUE
 )
 ```
 
-## Suppression des colonnes 
+## Transformation en numérique
+```{r}
+df$`Nombre de créations d'entreprises - Ensemble - France - Données mensuelles brutes`<- as.numeric(df$`Nombre de créations d'entreprises - Ensemble - France - Données mensuelles brutes`)
+```
+
+## Suppression des colonnes inutiles
 ```{r}
 df <- df[-c(1, 2, 3), ]
 df <- df[, !names(df) %in% "Codes"]
@@ -29,4 +31,85 @@ library(naniar)
 vis_miss(df)
 ```
 Pas de valeurs manquantes 
+
+## Série temporelle
+```{r}
+df <- df[order(df$Libellé), ]
+```
+
+```{r}
+library(tibble)
+df <- column_to_rownames(df, var="Libellé")
+```
+
+```{r}
+yy <- ts(data=df, start=c(2008,01),frequency = 12)
+```
+
+# Analyse exploratoire
+
+## présentation de la série
+```{r}
+plot(yy)
+```
+
+## points atypiques 
+```{r}
+library(tsoutliers)
+fit<- tso(yy)
+plot(fit)
+show(fit)
+```
+
+## correction 
+```{r}
+adj <- fit$yadj
+plot(adj)
+#write(t(adj),file="adjusted-outlier-serie.out",ncolumn = 1, append=FALSE)
+```
+
+## stat descr sur la série ajustée 
+```{r}
+library(tseries)
+library(ggplot2)
+library(moments)
+```
+
+```{r}
+moy_adj <- mean(adj)
+sd_adj <- sd(adj)
+med_adj <- median(adj)
+skew_adj <- skewness(adj)
+kurt_adj <- kurtosis(adj)
+
+stats <- data.frame(
+  Statistiques = c("Moyenne", "Ecart-type", "Médiane", "Skewness", "Kurtosis"),
+  Valeur = c(moy_adj,sd_adj, med_adj, skew_adj, kurt_adj)
+)
+print(stats)
+```
+
+## test de normalité (jarque bera)
+```{r}
+jarque.bera.test(adj)
+```
+pas de normalité
+
+##boxplot
+```{r}
+boxplot(adj,
+        main = "Boxplot de la série corrigée des points atypiques",
+        col = "lightblue",
+        horizontal = TRUE)
+```
+
+
+```{r}
+ggplot(data.frame(adj), aes(x = adj)) +
+  geom_histogram(aes(y = ..density..), bins = 25, fill = "skyblue", color = "black") +
+  geom_density(color = "red", size = 1.2) +
+  labs(title = "Histogramme + densité de la série corrigée",
+       x = "Valeurs", y = "Densité")
+
+```
 
