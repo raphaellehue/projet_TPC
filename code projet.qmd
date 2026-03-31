@@ -1,0 +1,24 @@
+---
+title: "TPC"
+format: pdf
+editor: visual
+---
+
+```{r}
+library(readr)
+
+df <- read_delim(
+  "C:/Users/rhuep/Downloads/valeurs_mensuelles.csv",
+  delim = ";",
+  escape_double = FALSE,
+  trim_ws = TRUE
+)
+```
+
+
+```{r}
+df <- df[-c(1, 2, 3), ]
+df <- df[, !names(df) %in% "Codes"]
+View (df)
+```
+
