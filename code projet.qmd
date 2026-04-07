@@ -65,7 +65,6 @@ show(fit)
 ```{r}
 adj <- fit$yadj
 plot(adj)
-#write(t(adj),file="adjusted-outlier-serie.out",ncolumn = 1, append=FALSE)
 ```
 
 ## stat descr sur la série ajustée 
@@ -95,7 +94,7 @@ jarque.bera.test(adj)
 ```
 pas de normalité
 
-##boxplot
+## boxplot
 ```{r}
 boxplot(adj,
         main = "Boxplot de la série corrigée des points atypiques",
@@ -103,13 +102,381 @@ boxplot(adj,
         horizontal = TRUE)
 ```
 
-
+## histogramme densité
 ```{r}
 ggplot(data.frame(adj), aes(x = adj)) +
   geom_histogram(aes(y = ..density..), bins = 25, fill = "skyblue", color = "black") +
-  geom_density(color = "red", size = 1.2) +
+  geom_density(color = "deeppink", size = 1.2) +
   labs(title = "Histogramme + densité de la série corrigée",
        x = "Valeurs", y = "Densité")
 
 ```
 
+# Detection de la saisonnalité
+
+## test seatstest
+```{r}
+library(seastests)
+
+sd_test <- seasdum(adj) 
+sd_test
+```
+t stat : 53.39 
+p value : 0 on regette l'absence de saisonnalité
+
+```{r}
+wo_test <- combined_test(adj)
+wo_test
+```
+t stat : 1
+p value : 0
+
+## ACF
+```{r}
+library(forecast)
+par(mfrow=c(1,2))
+acf(adj,main="ACF série corrigé (niveau)")
+acf(diff(adj), main="ACF différence première")
+```
+
+## Periodogramme 
+```{r}
+library(TSA)
+par(mfrow=c(1,2))
+periodogram(adj,main="Périodogramme série corrigé (niveau)")
+periodogram(diff(adj), main="Périodogramme différence première")
+```
+
+# Désaisonnalisation 
+```{r}
+library(RJDemetra)
+```
+
+## Estimation RegARIMA + X13-SEATS
+```{r}
+regx13 <- regarima_x13(adj, spec = "RG5c")
+summary(regx13)
+```
+
+## Test log-level (additif vs multiplicatif)
+```{r}
+s_transform(regx13)
+```
+schéma additif pas de transformation en log
+
+## Extraction des composantes X13
+```{r}
+# Série désaisonnalisée (SA)
+sa_series <- regx13$final$sa
+
+# Tendance-cycle (Trend)
+trend_series <- regx13$final$t
+
+# Composante saisonnière (Seasonal)
+seasonal_series <- regx13$final$s
+
+# Composante irrégulière (Irregular)
+irregular_series <- regx13$final$i
+```
+
+## Visualisation
+```{r}
+plot(regx13)
+```
+
+## Récupération du modèle SARIMA retenu 
+```{r}
+regx13$arma
+```
+
+
+## Effets déterministes (CJO, fêtes, outliers)
+```{r}
+regx13$model$effects
+```
+
+
+# Découpage 
+```{r}
+adj_train <- window(adj,end=c(2025,2))
+adj_test <- window(adj,start=c(2025,3), end=c(2026, 2))
+```
+
+```{r}
+length(adj_train)
+length(adj_test) #fenêtre de 12 mois
+```
+
+# Prévision 
+## Prévision naive
+```{r}
+naive <- snaive(adj_train, h=12)
+prev_naive <- naive$mean
+```
+
+## Prévision X13 - sarima seats
+```{r}
+regx13 <- regarima_x13(adj_train, spec="RG5c")
+prev_x13 <- regx13$forecast[1:12]
+```
+
+## Prévision STL + arima 
+```{r}
+stl <- stlm(adj_train)
+prev_stl <- forecast(stl, h=12)$mean
+```
+
+## Prévision STS
+```{r}
+sts <- StructTS(adj_train, type="BSM")
+prev_sts <- forecast(sts, h=12)$mean
+```
+
+```{r}
+sts$coeff
+sts$var
+```
+
+## Prévision lissage exponentiel 
+
+### Holt-Winters
+```{r}
+hw <- HoltWinters(adj_train, seasonal = "mul")
+prev_hw <- forecast(hw, h = 12)$mean
+```
+
+### ETS 
+```{r}
+ets <- ets(adj_train)
+prev_ets <- forecast(ets, h = 12)$mean
+```
+
+### TBATS
+```{r}
+tbats <- tbats(adj_train)
+prev_tbats <- forecast(tbats, h = 12)$mean
+```
+
+### ADAM 1 : ETS + SARIMA (modèle complet)
+```{r}
+library(smooth)
+adam1 <- auto.adam(adj_train, model = "ZZZ", lags = c(1,12))
+prev_adam1 <- forecast(adam1, h = 12)$mean
+```
+
+### ADAM 2 : ETS + ARIMA (sans saisonnalité SARIMA)
+```{r}
+adam2 <- auto.adam(adj_train, model = "ZZZ", lags = 1)
+prev_adam2 <- forecast(adam2, h = 12)$mean
+```
+
+### SARIMA classique
+```{r}
+library(forecast)
+sarima <- auto.arima(adj_train, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+prev_sarima <- forecast(sarima, h = 12)$mean
+```
+
+### SSARIMA
+```{r}
+library(smooth)
+ssarima <- auto.ssarima(adj_train, lags = c(1,12))
+prev_ssarima <- forecast(ssarima, h = 12)$mean
+```
+
+
+## AIC des modèles
+```{r}
+aic_naive  <- NA
+aicc_naive <- NA
+```
+
+```{r}
+aic_x13  <- regx13$likelihood$aic
+aicc_x13 <- regx13$likelihood$aicc
+```
+
+```{r}
+aic_stl  <- AIC(stl$model)
+aicc_stl <- AICc(stl$model)
+```
+
+```{r}
+aic_sts  <- sts$AIC
+ks <- length(sts$coef)
+n <- length(adj_train)
+aicc_sts <- aic_sts+(2*ks*(ks+1))/(n-ks-1)
+```
+
+```{r}
+aic_hw  <- NA
+aicc_hw <- NA
+```
+
+```{r}
+aic_ets  <- NA
+aicc_ets <- NA
+```
+
+```{r}
+aic_tbats  <- tbats$AIC
+kt <- length(tbats$parameters)
+n <- length(adj_train)
+aicc_tbats <- aic_tbats+(2*kt*(kt+1))/(n-kt-1)
+```
+
+```{r}
+aic_adam1  <- adam1$ICs["AIC"]
+aicc_adam1 <- adam1$ICs["AICc"]
+```
+
+```{r}
+aic_adam2  <- adam2$ICs["AIC"]
+aicc_adam2 <- adam2$ICs["AICc"]
+```
+
+```{r}
+aic_sarima  <- AIC(sarima)
+aicc_sarima <- AICc(sarima)
+```
+
+```{r}
+aic_ssarima  <- ssarima$ICs["AIC"]
+aicc_ssarima <- ssarima$ICs["AICc"]
+```
+
+
+## Paramètres 
+
+```{r}
+hw$alpha
+hw$beta
+hw$gamma
+```
+
+```{r}
+ets$par
+ets$components  # type de tendance/saison
+```
+
+```{r}
+tbats$parameters
+```
+
+```{r}
+adam1$parameters
+adam2$parameters
+```
+
+```{r}
+sarima$coef
+sarima$arma   # (p,d,q)(P,D,Q)
+```
+
+```{r}
+ssarima$parameters
+ssarima$orders
+```
+
+```{r}
+sts$coef
+sts$var  # variances level, slope, seasonal, irregular
+```
+
+```{r}
+stl$model$coef
+```
+
+```{r}
+regx13$model$arima
+regx13$model$effects
+```
+
+```{r}
+if (is.null(aic_stl))  aic_stl  <- NA
+if (is.null(aicc_stl)) aicc_stl <- NA
+
+if (is.null(aic_sts))  aic_sts  <- NA
+if (is.null(aicc_sts)) aicc_sts <- NA
+
+if (is.null(aic_ssarima))  aic_ssarima  <- NA
+if (is.null(aicc_ssarima)) aicc_ssarima <- NA
+
+fixAIC <- function(x) {
+  if (is.null(x)) return(NA_real_)
+  if (length(x) != 1) return(NA_real_)
+  if (!is.numeric(x)) return(NA_real_)
+  return(as.numeric(x))
+}
+
+aic_naive  <- fixAIC(aic_naive)
+aic_x13    <- fixAIC(aic_x13)
+aic_stl    <- fixAIC(aic_stl)
+aic_sts    <- fixAIC(aic_sts)
+aic_hw     <- fixAIC(aic_hw)
+aic_ets    <- fixAIC(aic_ets)
+aic_tbats  <- fixAIC(aic_tbats)
+aic_adam1  <- fixAIC(aic_adam1)
+aic_adam2  <- fixAIC(aic_adam2)
+aic_sarima <- fixAIC(aic_sarima)
+aic_ssarima <- fixAIC(aic_ssarima)
+
+aicc_naive  <- fixAIC(aicc_naive)
+aicc_x13    <- fixAIC(aicc_x13)
+aicc_stl    <- fixAIC(aicc_stl)
+aicc_sts    <- fixAIC(aicc_sts)
+aicc_hw     <- fixAIC(aicc_hw)
+aicc_ets    <- fixAIC(aicc_ets)
+aicc_tbats  <- fixAIC(aicc_tbats)
+aicc_adam1  <- fixAIC(aicc_adam1)
+aicc_adam2  <- fixAIC(aicc_adam2)
+aicc_sarima <- fixAIC(aicc_sarima)
+aicc_ssarima <- fixAIC(aicc_ssarima)
+
+results <- data.frame(
+  Model = c("Naive", "X13", "STL", "STS",
+           "HW", "ETS", "TBATS",
+            "ADAM1", "ADAM2",
+            "SARIMA", "SSARIMA"),
+  AIC = c(aic_naive, aic_x13, aic_stl, aic_sts,
+          aic_hw, aic_ets, aic_tbats,
+          aic_adam1, aic_adam2,
+          aic_sarima, aic_ssarima),
+  AICc = c(aicc_naive, aicc_x13, aicc_stl, aicc_sts, 
+           aicc_hw, aicc_ets, aicc_tbats,
+           aicc_adam1, aicc_adam2,
+           aicc_sarima, aicc_ssarima)
+)
+
+results[order(results$AICc), ]
+```
+
+```{r}
+library(ggplot2)
+
+df_plot <- data.frame(
+  Date = time(adj_test),
+  Réel = as.numeric(adj_test),
+  Naive = as.numeric(prev_naive),
+  X13 = as.numeric(prev_x13),
+  ETS = as.numeric(prev_ets),
+  ADAM = as.numeric(prev_adam1),
+  SARIMA = as.numeric(prev_sarima),
+  TBATS = as.numeric(prev_tbats)
+)
+
+df_long <- reshape2::melt(df_plot, id.vars = "Date",
+                          variable.name = "Modèle",
+                          value.name = "Valeur")
+
+```
+
+```{r}
+ggplot(df_long, aes(x = Date, y = Valeur, color = Modèle, linetype = Modèle)) +
+  geom_line(size = 1.1) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(title = "Prévisions OOS (2025) : comparaison des modèles",
+       x = "Date", y = "Valeur") +
+  theme_minimal(base_size = 14)
+
+```
