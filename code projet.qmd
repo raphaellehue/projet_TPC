@@ -50,7 +50,11 @@ yy <- ts(data=df, start=c(2008,01),frequency = 12)
 
 ## présentation de la série
 ```{r}
-plot(yy)
+plot.ts(yy, main="Graphique de la série de création d'entreprises",xlab="Date", ylab="Créations d'entreprises")
+```
+
+```{r}
+ggseasonplot(yy,col=rainbow(12), year.labels = TRUE)
 ```
 
 ## points atypiques 
@@ -233,8 +237,11 @@ prev_sts <- forecast(sts, h=12)$mean
 ```
 
 ```{r}
-sts$coeff
-sts$var
+# Tableau des variances STS avec sts$coef
+data.frame(
+  Composante = c("Level", "Slope", "Seas", "Epsilon"),
+  Variance   = as.numeric(sts$coef)
+)
 ```
 
 ## Prévision lissage exponentiel 
@@ -292,48 +299,59 @@ aicc_naive <- NA
 ```
 
 ```{r}
-aic_x13  <- regx13$likelihood$aic
-aicc_x13 <- regx13$likelihood$aicc
+aic_x13  <- 3606
+aicc_x13 <- 3610
 ```
 
 ```{r}
-aic_stl  <- AIC(stl$model)
-aicc_stl <- AICc(stl$model)
+aic_stl  <- stl$model$aic
+aicc_stl <- stl$model$aicc
 ```
 
+
 ```{r}
-aic_sts  <- sts$AIC
-ks <- length(sts$coef)
-n <- length(adj_train)
-aicc_sts <- aic_sts+(2*ks*(ks+1))/(n-ks-1)
+resid_sts <- residuals(sts)
+n_sts     <- length(resid_sts)
+k_sts     <- length(sts$coef) 
+
+sigma2    <- var(resid_sts, na.rm = TRUE)
+ll_sts    <- -n_sts/2 * log(2 * pi * sigma2) - n_sts/2
+
+aic_sts   <- -2 * ll_sts + 2 * k_sts
+aicc_sts  <- aic_sts + (2*k_sts*(k_sts+1)) / (n_sts - k_sts - 1)
 ```
+
 
 ```{r}
 aic_hw  <- NA
 aicc_hw <- NA
 ```
 
+
 ```{r}
-aic_ets  <- NA
-aicc_ets <- NA
+aic_ets  <- ets$aic
+aicc_ets <- ets$aicc
 ```
 
 ```{r}
-aic_tbats  <- tbats$AIC
-kt <- length(tbats$parameters)
-n <- length(adj_train)
-aicc_tbats <- aic_tbats+(2*kt*(kt+1))/(n-kt-1)
+aic_tbats <- tbats$AIC
+k_tbats   <- length(tbats$parameters)
+n_tbats   <- length(adj_train)
+aicc_tbats <- aic_tbats + (2*k_tbats*(k_tbats+1)) / (n_tbats - k_tbats - 1)
 ```
 
-```{r}
-aic_adam1  <- adam1$ICs["AIC"]
-aicc_adam1 <- adam1$ICs["AICc"]
-```
 
 ```{r}
-aic_adam2  <- adam2$ICs["AIC"]
-aicc_adam2 <- adam2$ICs["AICc"]
+aic_adam1  <- as.numeric(adam1$ICs)
+aicc_adam1 <- 3967.483
 ```
+
+
+```{r}
+aic_adam2  <- as.numeric(adam2$ICs)
+aicc_adam2 <- 4265.16
+```
+
 
 ```{r}
 aic_sarima  <- AIC(sarima)
@@ -341,8 +359,8 @@ aicc_sarima <- AICc(sarima)
 ```
 
 ```{r}
-aic_ssarima  <- ssarima$ICs["AIC"]
-aicc_ssarima <- ssarima$ICs["AICc"]
+aic_ssarima  <- as.numeric(ssarima$ICs[1])
+aicc_ssarima <- as.numeric(ssarima$ICs[2])
 ```
 
 
@@ -393,21 +411,6 @@ regx13$model$effects
 ```
 
 ```{r}
-if (is.null(aic_stl))  aic_stl  <- NA
-if (is.null(aicc_stl)) aicc_stl <- NA
-
-if (is.null(aic_sts))  aic_sts  <- NA
-if (is.null(aicc_sts)) aicc_sts <- NA
-
-if (is.null(aic_ssarima))  aic_ssarima  <- NA
-if (is.null(aicc_ssarima)) aicc_ssarima <- NA
-
-fixAIC <- function(x) {
-  if (is.null(x)) return(NA_real_)
-  if (length(x) != 1) return(NA_real_)
-  if (!is.numeric(x)) return(NA_real_)
-  return(as.numeric(x))
-}
 
 aic_naive  <- fixAIC(aic_naive)
 aic_x13    <- fixAIC(aic_x13)
@@ -452,31 +455,245 @@ results[order(results$AICc), ]
 ```
 
 ```{r}
-library(ggplot2)
+library(tidyr)
+library(dplyr)
 
-df_plot <- data.frame(
+df_long <- df_plot %>%
+  pivot_longer(cols = -Date,
+               names_to = "Modele",
+               values_to = "Valeur")
+
+df_long$Modele <- factor(df_long$Modele, 
+                         levels = c("Réel","Naive","X13","STL","STS",
+                                    "HW","ETS","TBATS","ADAM1","ADAM2",
+                                    "SARIMA","SSARIMA"))
+
+ggplot(df_long, aes(x = Date, y = Valeur, color = Modele, linetype = Modele)) +
+  geom_line(size = 1.1) +
+  geom_line(data = subset(df_long, Modele == "Réel"),
+            aes(x = Date, y = Valeur),
+            color = "black", size = 1, inherit.aes = FALSE) +
+  scale_color_manual(values = c(
+    "Réel"    = "black",
+    "Naive"   = "#F8766D",
+    "X13"     = "darkblue",
+    "STL"     = "#C77CFF",
+    "STS"     = "deeppink",
+    "HW"      = "#CD9600",
+    "ETS"     = "#00BE67",
+    "TBATS"   = "#00A9FF",
+    "ADAM1"   = "darkred",
+    "ADAM2"   = "#ABA300",
+    "SARIMA"  = "red",
+    "SSARIMA" = "#0CB702"
+  )) +
+  labs(title = "Prévisions OOS (2025) : comparaison des modèles",
+       x = "Date", y = "Valeur",
+       color = "Modèle", linetype = "Modèle") +
+  theme_minimal(base_size = 14)
+```
+
+## Erreurs
+```{r}
+err_naive  <- adj_test - prev_naive
+err_x13    <- adj_test - prev_x13
+err_ets    <- adj_test - prev_ets
+err_adam1   <- adj_test - prev_adam1
+err_sarima <- adj_test - prev_sarima
+err_tbats  <- adj_test - prev_tbats
+err_stl     <- adj_test - prev_stl
+err_sts     <- adj_test - prev_sts
+err_hw      <- adj_test - prev_hw
+err_adam2  <- adj_test - prev_adam2
+err_ssarima <- adj_test - prev_ssarima
+```
+
+## MSE
+```{r}
+mse_naive  <- mean(err_naive^2)
+mse_x13    <- mean(err_x13^2)
+mse_ets    <- mean(err_ets^2)
+mse_adam   <- mean(err_adam^2)
+mse_sarima <- mean(err_sarima^2)
+mse_tbats  <- mean(err_tbats^2)
+mse_stl     <- mean(err_stl^2)
+mse_sts     <- mean(err_sts^2)
+mse_hw      <- mean(err_hw^2)
+mse_adam2   <- mean(err_adam2^2)
+mse_ssarima <- mean(err_ssarima^2)
+```
+
+## R²OOS
+```{r}
+ybar_train <- mean(adj_train)
+denom <- sum((adj_test - ybar_train)^2)
+r2_naive  <- 1 - sum(err_naive^2)  / denom
+r2_x13    <- 1 - sum(err_x13^2)    / denom
+r2_ets    <- 1 - sum(err_ets^2)    / denom
+r2_adam   <- 1 - sum(err_adam^2)   / denom
+r2_sarima <- 1 - sum(err_sarima^2) / denom
+r2_tbats  <- 1 - sum(err_tbats^2)  / denom
+r2_stl     <- 1 - sum(err_stl^2)     / denom
+r2_sts     <- 1 - sum(err_sts^2)     / denom
+r2_hw      <- 1 - sum(err_hw^2)      / denom
+r2_adam2   <- 1 - sum(err_adam2^2)   / denom
+r2_ssarima <- 1 - sum(err_ssarima^2) / denom
+```
+
+## CSPE
+```{r}
+cspe_naive  <- cumsum(err_naive^2)
+cspe_x13    <- cumsum(err_x13^2)
+cspe_ets    <- cumsum(err_ets^2)
+cspe_adam   <- cumsum(err_adam^2)
+cspe_sarima <- cumsum(err_sarima^2)
+cspe_tbats  <- cumsum(err_tbats^2)
+
+df_cspe <- data.frame(
   Date = time(adj_test),
-  Réel = as.numeric(adj_test),
-  Naive = as.numeric(prev_naive),
-  X13 = as.numeric(prev_x13),
-  ETS = as.numeric(prev_ets),
-  ADAM = as.numeric(prev_adam1),
-  SARIMA = as.numeric(prev_sarima),
-  TBATS = as.numeric(prev_tbats)
+  Naive = cspe_naive,
+  X13 = cspe_x13,
+  ETS = cspe_ets,
+  ADAM = cspe_adam,
+  SARIMA = cspe_sarima,
+  TBATS = cspe_tbats
 )
 
-df_long <- reshape2::melt(df_plot, id.vars = "Date",
-                          variable.name = "Modèle",
-                          value.name = "Valeur")
+df_long <- reshape2::melt(df_cspe, id.vars = "Date")
 
+ggplot(df_long, aes(Date, value, color = variable)) +
+  geom_line(size = 1.1) +
+  labs(title = "CSPE (Cumulative Sum of Prediction Errors)",
+       y = "CSPE", x = "Date") +
+  theme_minimal(base_size = 14)
+```
+
+## Tableau
+```{r}
+results_perf <- data.frame(
+  Modèle = c("Naive","X13","STL","STS","HW","ETS",
+             "TBATS","ADAM1","ADAM2","SARIMA","SSARIMA"),
+  MSE    = c(mse_naive, mse_x13, mse_stl, mse_sts, mse_hw,
+             mse_ets, mse_tbats, mse_adam, mse_adam2,
+             mse_sarima, mse_ssarima),
+  R2_OOS = c(r2_naive, r2_x13, r2_stl, r2_sts, r2_hw,
+             r2_ets, r2_tbats, r2_adam, r2_adam2,
+             r2_sarima, r2_ssarima)
+)
+results_perf[order(results_perf$MSE), ]
+```
+x13 meilleur modèle
+
+## 
+```{r}
+fit_ar1 <- Arima(adj_train, order = c(1,0,0))
+prev_ar1 <- forecast(fit_ar1, h = length(adj_test))$mean
+
+err_ar1 <- adj_test - prev_ar1
+
+loss_ar1    <- err_ar1^2
+loss_naive  <- err_naive^2
+loss_x13    <- err_x13^2
+loss_ets    <- err_ets^2
+loss_adam   <- err_adam^2
+loss_sarima <- err_sarima^2
+loss_tbats  <- err_tbats^2
+loss_stl     <- err_stl^2
+loss_sts     <- err_sts^2
+loss_hw      <- err_hw^2
+loss_adam2   <- err_adam2^2
+loss_ssarima <- err_ssarima^2
+```
+
+
+```{r}
+library(forecast)
+
+dm_naive  <- dm.test(loss_naive,  loss_ar1, alternative = "less")
+dm_x13    <- dm.test(loss_x13,    loss_ar1, alternative = "less")
+dm_ets    <- dm.test(loss_ets,    loss_ar1, alternative = "less")
+dm_adam   <- dm.test(loss_adam,   loss_ar1, alternative = "less")
+dm_sarima <- dm.test(loss_sarima, loss_ar1, alternative = "less")
+dm_tbats  <- dm.test(loss_tbats,  loss_ar1, alternative = "less")
+dm_stl     <- dm.test(loss_stl,     loss_ar1, alternative = "less")
+dm_sts     <- dm.test(loss_sts,     loss_ar1, alternative = "less")
+dm_hw      <- dm.test(loss_hw,      loss_ar1, alternative = "less")
+dm_adam2   <- dm.test(loss_adam2,   loss_ar1, alternative = "less")
+dm_ssarima <- dm.test(loss_ssarima, loss_ar1, alternative = "less")
+
+p_dm <- data.frame(
+  Modèle  = c("Naive","X13","STL","STS","HW","ETS",
+              "TBATS","ADAM1","ADAM2","SARIMA","SSARIMA"),
+  p_value = c(dm_naive$p.value, dm_x13$p.value,
+              dm_stl$p.value,   dm_sts$p.value,
+              dm_hw$p.value,    dm_ets$p.value,
+              dm_tbats$p.value, dm_adam$p.value,
+              dm_adam2$p.value, dm_sarima$p.value,
+              dm_ssarima$p.value)
+)
+p_dm
+```
+tout les modèles prédit sont meilleurs qu'un ar(1) et x13 le meilleur 
+
+```{r}
+regx13_final <- regarima_x13(adj, spec = "RG5c")
+prev_best <- regx13_final$forecast 
+
+dates_prev <- time(adj)
+last_date  <- end(adj)
+
+prev_ts <- ts(prev_best[, 1],   
+              start = c(last_date[1], last_date[2] + 1),
+              frequency = 12)
+
+# Graphique
+autoplot(adj) +
+  autolayer(prev_ts, series = "Prévision X13", color = "firebrick") +
+  labs(title = "Prévision finale sur 12 mois – X13 (meilleur modèle)",
+       x = "Temps", y = "Valeur") +
+  theme_minimal(base_size = 14)
 ```
 
 ```{r}
-ggplot(df_long, aes(x = Date, y = Valeur, color = Modèle, linetype = Modèle)) +
-  geom_line(size = 1.1) +
-  scale_color_brewer(palette = "Dark2") +
-  labs(title = "Prévisions OOS (2025) : comparaison des modèles",
-       x = "Date", y = "Valeur") +
-  theme_minimal(base_size = 14)
+fc <- regx13_final$forecast
 
+last_date  <- end(adj)
+start_prev <- c(last_date[1], last_date[2] + 1)
+
+# Extraction
+prev_central <- ts(fc[, "fcst"],    start = start_prev, frequency = 12)
+prev_se      <- ts(fc[, "fcsterr"], start = start_prev, frequency = 12)
+
+# IC à 95%
+prev_lower <- prev_central - 1.96 * prev_se
+prev_upper <- prev_central + 1.96 * prev_se
+
+# Data frames pour ggplot
+df_prev <- data.frame(
+  Date  = as.numeric(time(prev_central)),
+  Prev  = as.numeric(prev_central),
+  Lower = as.numeric(prev_lower),
+  Upper = as.numeric(prev_upper)
+)
+
+df_adj <- data.frame(
+  Date   = as.numeric(time(adj)),
+  Valeur = as.numeric(adj)
+)
+
+# Graphique
+ggplot() +
+  geom_line(data = df_adj,
+            aes(x = Date, y = Valeur, color = "Série réelle"), size = 1) +
+  geom_line(data = df_prev,
+            aes(x = Date, y = Prev, color = "Prévision X13"), size = 1) +
+  geom_ribbon(data = df_prev,
+              aes(x = Date, ymin = Lower, ymax = Upper),
+              fill = "firebrick", alpha = 0.2) +
+  scale_color_manual(values = c("Série réelle"  = "steelblue",
+                                "Prévision X13" = "firebrick")) +
+  labs(title = "Prévision finale sur 12 mois – X13 avec IC 95%",
+       x = "Temps", y = "Valeur", color = "") +
+  theme_minimal(base_size = 14)
 ```
+
